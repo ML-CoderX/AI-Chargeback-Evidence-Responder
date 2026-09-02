@@ -6,9 +6,17 @@ A defense-only chargeback evidence management tool built for the **Razorpay AI R
 
 ```bash
 npm install
-npm run seed       # Populate with 80 synthetic disputes
+
+# Add your Razorpay test-mode API keys (optional but recommended)
+# Generate at: Razorpay Dashboard > Account & Settings > API Keys (Test Mode ON)
+echo "RAZORPAY_KEY_ID=rzp_test_YOUR_KEY" >> .env.local
+echo "RAZORPAY_KEY_SECRET=YOUR_SECRET" >> .env.local
+
+npm run seed       # Creates 80 real Razorpay test orders + synthetic disputes
 npm run dev        # Start at http://localhost:3000
 ```
+
+> Without API keys, `npm run seed` still works — it falls back to synthetic order IDs.
 
 On the Cases page, click **Score all** to compute win probabilities and completeness scores for every dispute. Then visit `/metrics` to see evaluation results on the 20 held-out disputes.
 
@@ -24,7 +32,7 @@ This system exists to help a human analyst prepare evidence for chargeback dispu
 
 4. **Full audit trail.** Every evidence retrieval, score computation, draft generation, and review action writes an append-only row to `audit_log`. There are no UPDATE or DELETE operations on this table.
 
-5. **Synthetic data only.** All 80 disputes use generated IDs (`disp_*`, `ord_*`, `cust_*`). No real payment credentials, API keys, or network endpoints exist in this project.
+5. **Real orders, simulated disputes.** Orders are created live via Razorpay's test-mode API (`order_*` IDs are real Razorpay test-mode objects, visible in the Razorpay Dashboard). Dispute events, evidence fields, and outcomes are simulated, because Razorpay's sandbox cannot self-trigger a chargeback — only the underlying order can be real. Payments are synthetic (`pay_sim_*`) because Razorpay requires client-side checkout for payment creation (PCI-DSS compliance). If no API keys are configured, the seed falls back to fully synthetic order IDs.
 
 ## Architecture
 

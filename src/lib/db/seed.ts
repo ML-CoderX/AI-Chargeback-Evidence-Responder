@@ -1,6 +1,11 @@
 // ============================================================
-// Seed — 80 synthetic disputes (60 train + 20 holdout)
+// Seed — 80 synthetic disputes backed by real Razorpay orders
 // ============================================================
+// Order creation: REAL Razorpay test-mode API calls (order_* IDs)
+// Payment simulation: synthetic pay_* IDs (Razorpay requires
+//   client-side checkout for payment creation — PCI-DSS constraint)
+// Disputes/evidence/outcomes: fully synthetic
+//
 // Ground-truth rule for actual_outcome:
 //   won  if  (auth_strong AND fulfillment_strong)
 //            OR (auth_strong AND reason is fraud-related)
@@ -11,12 +16,26 @@
 //   auth_strong     = three_ds_result === 'success' AND (avs_match OR cvv_match)
 //   fulfillment_strong = delivery_confirmed AND tracking_id != null
 //
-// Deliberately introduces NULL evidence fields on ~30% of disputes
-// so Phase 3 completeness-flag testing is meaningful.
+// ~30% of evidence fields are deliberately NULL for completeness testing.
 // ============================================================
 
 import { getDb, insertAuditLog, saveDb } from '@/lib/db';
 import { ReasonCode } from '@/types';
+
+/* ---- Razorpay SDK ---- */
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const Razorpay = require('razorpay');
+
+function getRazorpayClient() {
+  const keyId = process.env.RAZORPAY_KEY_ID;
+  const keySecret = process.env.RAZORPAY_KEY_SECRET;
+
+  if (!keyId || keyId === 'rzp_test_REPLACE_ME' || !keySecret || keySecret === 'REPLACE_ME') {
+    return null; // Fall back to synthetic orders
+  }
+
+  return new Razorpay({ key_id: keyId, key_secret: keySecret });
+}
 
 /* ---- helpers ---- */
 function pick<T>(a: readonly T[]): T { return a[Math.floor(Math.random() * a.length)]; }
@@ -24,6 +43,7 @@ function rInt(lo: number, hi: number) { return lo + Math.floor(Math.random() * (
 function rBool(pTrue = 0.5): number { return Math.random() < pTrue ? 1 : 0; }
 function maybe<T>(val: T, pNull = 0.3): T | null { return Math.random() < pNull ? null : val; }
 function uid(prefix: string) { return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`; }
+function sleep(ms: number) { return new Promise(r => setTimeout(r, ms)); }
 
 const NAMES = [
   'Aarav Sharma','Priya Patel','Vikram Singh','Ananya Gupta',
@@ -37,9 +57,47 @@ const REASON_CODES: ReasonCode[] = [
   'fraudulent_transaction','product_not_received',
   'product_not_as_described','duplicate_charge',
 ];
+const PRODUCTS = [
+  'Wireless Earbuds','USB-C Hub','Laptop Stand','Mechanical Keyboard',
+  'Webcam HD','Monitor Light','Phone Case','Charging Cable',
+  'Power Bank','Desk Mat','Screen Protector','Travel Adapter',
+];
 
 function addr() {
   return `${rInt(1,500)}, ${pick(STREETS)}, ${pick(CITIES)} ${rInt(100000,999999)}`;
+}
+
+/* ---- Razorpay order creation with retry ---- */
+async function createRazorpayOrder(
+  rzp: InstanceType<typeof Razorpay>,
+  amount: number,
+  receipt: string,
+  maxRetries = 2
+): Promise<{ id: string; receipt: string }> {
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      const order = await rzp.orders.create({
+        amount,
+        currency: 'INR',
+        receipt,
+        notes: {
+          source: 'chargeback_evidence_responder',
+          environment: 'hackathon_seed',
+          product: pick(PRODUCTS),
+          customer: pick(NAMES),
+        },
+      });
+      return { id: order.id, receipt: order.receipt };
+    } catch (err) {
+      if (attempt < maxRetries) {
+        console.warn(`  Razorpay order creation failed (attempt ${attempt + 1}), retrying...`);
+        await sleep(500);
+      } else {
+        throw err;
+      }
+    }
+  }
+  throw new Error('Unreachable');
 }
 
 /* ---- ground-truth rule ---- */
@@ -60,6 +118,15 @@ function computeOutcome(
 /* ---- main ---- */
 export async function seedDatabase() {
   const db = await getDb();
+  const rzp = getRazorpayClient();
+  const useRealOrders = rzp !== null;
+
+  if (useRealOrders) {
+    console.log('  Razorpay API keys detected — creating REAL test-mode orders');
+  } else {
+    console.log('  No Razorpay API keys — falling back to synthetic order IDs');
+    console.log('  To use real orders, set RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET in .env.local');
+  }
 
   // Wipe existing data (order matters for FK)
   for (const t of [
@@ -76,15 +143,47 @@ export async function seedDatabase() {
   const customerPool: string[] = [];
   for (let i = 0; i < 30; i++) customerPool.push(uid('cust'));
 
+  let realOrderCount = 0;
+
   for (let i = 0; i < NUM; i++) {
     const isHoldout = i >= HOLDOUT_START ? 1 : 0;
-    const orderId   = uid('ord');
-    const disputeId = uid('disp');
     const customerId = pick(customerPool);
     const reason    = pick(REASON_CODES);
     const amount    = pick([15000,25000,49900,99900,149900,250000,499900,999900]);
     const placedAt  = now - rInt(10, 120) * 86400;
     const filedAt   = placedAt + rInt(3, 30) * 86400;
+    const receipt   = `rcpt_${i}_${Date.now().toString(36)}`;
+
+    // ---- Create order: real Razorpay or synthetic ----
+    let orderId: string;
+    let paymentId: string;
+
+    if (useRealOrders) {
+      try {
+        const order = await createRazorpayOrder(rzp, amount, receipt);
+        orderId = order.id;
+        // Payment ID is synthetic — Razorpay requires client-side checkout
+        // for payment creation (PCI-DSS compliance). We generate a synthetic
+        // pay_* ID linked to the real order.
+        paymentId = `pay_sim_${order.id.slice(6, 20)}`;
+        realOrderCount++;
+        if ((i + 1) % 10 === 0) {
+          console.log(`  Created ${i + 1}/${NUM} orders via Razorpay API`);
+        }
+      } catch (err) {
+        console.error(`  Failed to create Razorpay order #${i}, using synthetic:`, err);
+        orderId = uid('ord');
+        paymentId = uid('pay');
+      }
+
+      // Rate limiting: 200ms between API calls
+      await sleep(200);
+    } else {
+      orderId = uid('ord');
+      paymentId = uid('pay');
+    }
+
+    const disputeId = uid('disp');
 
     // ---- order ----
     db.run(
@@ -94,7 +193,6 @@ export async function seedDatabase() {
     );
 
     // ---- evidence_authentication ----
-    // ~30% chance each field is null to simulate missing evidence
     const avs = maybe(rBool(0.7), 0.25);
     const cvv = maybe(rBool(0.7), 0.25);
     const tds = maybe(pick(['success','success','success','failure','attempted']), 0.2);
@@ -155,7 +253,14 @@ export async function seedDatabase() {
       dispute_id: disputeId,
       action: 'dispute_created',
       actor: 'system',
-      payload_json: JSON.stringify({ reason_code: reason, amount, is_holdout: isHoldout }),
+      payload_json: JSON.stringify({
+        reason_code: reason,
+        amount,
+        is_holdout: isHoldout,
+        order_id: orderId,
+        payment_id: paymentId,
+        order_source: useRealOrders ? 'razorpay_test_api' : 'synthetic',
+      }),
       timestamp: filedAt,
     });
   }
@@ -164,10 +269,21 @@ export async function seedDatabase() {
     dispute_id: null,
     action: 'seed_complete',
     actor: 'system',
-    payload_json: JSON.stringify({ total: NUM, train: HOLDOUT_START, holdout: NUM - HOLDOUT_START }),
+    payload_json: JSON.stringify({
+      total: NUM,
+      train: HOLDOUT_START,
+      holdout: NUM - HOLDOUT_START,
+      real_razorpay_orders: realOrderCount,
+      order_source: useRealOrders ? 'razorpay_test_api' : 'synthetic',
+    }),
     timestamp: now,
   });
 
   saveDb();
-  return { total: NUM, train: HOLDOUT_START, holdout: NUM - HOLDOUT_START };
+  return {
+    total: NUM,
+    train: HOLDOUT_START,
+    holdout: NUM - HOLDOUT_START,
+    realOrders: realOrderCount,
+  };
 }

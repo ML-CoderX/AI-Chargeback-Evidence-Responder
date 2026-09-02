@@ -1,26 +1,166 @@
+/* ============================================================
+   Chargeback Evidence Responder — Design System v2
+   Forensic casework aesthetic. NOT a SaaS dashboard.
+   
+   Palette: warm paper + ink + teal (strong) + rust (missing)
+   Type: Source Serif 4 (headers) + Inter (body)
+   Grid: 8px spacing
+   ============================================================ */
+
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* Surface — warm paper, not clinical white */
+  --surface-base: #F6F5F1;
+  --surface-inset: #EEEDE8;
+  --surface-raised: #FFFFFF;
+  --surface-border: #D8D5CC;
+  --surface-border-subtle: #E8E6E0;
+
+  /* Ink — warm black */
+  --ink: #1C1B18;
+  --ink-secondary: #5C5A54;
+  --ink-muted: #8E8C86;
+  --ink-faint: #B5B3AD;
+
+  /* Semantic — teal for strong evidence, rust for weak/missing */
+  --signal-strong: #2F6E5C;
+  --signal-strong-bg: #E8F3EF;
+  --signal-weak: #A5432E;
+  --signal-weak-bg: #FAEAE6;
+
+  /* Neutral accents */
+  --accent-blue: #3B5998;
+  --accent-blue-bg: #EDF0F7;
+
+  /* Spacing (8px grid) */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-8: 32px;
+  --sp-10: 40px;
+  --sp-12: 48px;
+  --sp-16: 64px;
+
+  /* Type */
+  --font-serif: 'Source Serif 4', 'Georgia', serif;
+  --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+
+  /* Radius — minimal, document-like */
+  --radius-sm: 3px;
+  --radius-md: 4px;
+
+  /* Transitions */
+  --ease: 200ms ease-out;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html {
+  font-family: var(--font-sans);
+  font-size: 15px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--surface-base);
+  color: var(--ink);
+  min-height: 100vh;
+}
+
+/* Respect reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ---- Scrollbar (subtle) ---- */
+::-webkit-scrollbar { width: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--surface-border); border-radius: 3px; }
+
+/* ---- Headings: serif ---- */
+h1, h2, h3 {
+  font-family: var(--font-serif);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+}
+
+/* ---- Single deliberate animation: panel slide ---- */
+@keyframes panelEnter {
+  from { opacity: 0; transform: translateX(12px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+.panel-enter {
+  animation: panelEnter var(--ease) forwards;
+}
+
+/* ---- Evidence states ---- */
+.evidence-present {
+  color: var(--signal-strong);
+  background: var(--signal-strong-bg);
+  border-left: 3px solid var(--signal-strong);
+  padding: var(--sp-3) var(--sp-4);
+}
+
+.evidence-missing {
+  color: var(--signal-weak);
+  background: var(--signal-weak-bg);
+  border-left: 3px solid var(--signal-weak);
+  padding: var(--sp-3) var(--sp-4);
+}
+
+/* ---- Synthetic data bar ---- */
+.synth-bar {
+  background: var(--surface-inset);
+  border-bottom: 1px solid var(--surface-border);
+  padding: var(--sp-1) var(--sp-4);
+  text-align: center;
+  font-size: 0.7rem;
+  color: var(--ink-muted);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+/* ---- Buttons ---- */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-4);
+  font-family: var(--font-sans);
+  font-size: 0.8rem;
+  font-weight: 500;
+  border: 1px solid var(--surface-border);
+  border-radius: var(--radius-md);
+  background: var(--surface-raised);
+  color: var(--ink);
+  cursor: pointer;
+  transition: background var(--ease), border-color var(--ease);
+  text-decoration: none;
+}
+.btn:hover {
+  background: var(--surface-inset);
+  border-color: var(--ink-faint);
+}
+.btn-reviewed {
+  background: var(--signal-strong);
+  color: white;
+  border-color: var(--signal-strong);
+}
+.btn-reviewed:hover {
+  background: #266050;
 }

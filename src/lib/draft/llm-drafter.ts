@@ -14,7 +14,7 @@ import crypto from 'crypto';
 import { EvidenceBundle, DraftSection, ReasonCode, EvidenceCategory } from '@/types';
 import { getDb, insertAuditLog, saveDb } from '@/lib/db';
 
-const MODEL_NAME = 'gemini-2.0-flash';
+const MODEL_NAME = 'gemini-pro';
 
 function getGeminiClient(): GoogleGenerativeAI | null {
   const apiKey = process.env.GEMINI_API_KEY;

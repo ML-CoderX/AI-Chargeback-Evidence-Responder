@@ -545,7 +545,7 @@ function EvidenceTab({ evidence }: { evidence: DisputeDetail["evidence"] }) {
   const categories = [
     { key: "authentication", label: "Transaction Authentication", data: evidence.authentication },
     { key: "fulfillment", label: "Fulfillment / Delivery", data: evidence.fulfillment },
-    { key: "behavioral", label: "Customer Engagement", data: evidence.behavioral },
+    { key: "behavioral", label: "Customer Engagement History", data: evidence.behavioral },
     { key: "communication", label: "Policy Disclosure", data: evidence.communication },
   ];
 

@@ -6,6 +6,7 @@
 
 export interface Order {
   id: string;
+  payment_id: string;
   customer_id: string;
   amount: number;
   placed_at: number;

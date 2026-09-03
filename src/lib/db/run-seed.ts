@@ -1,7 +1,9 @@
 // Seed runner — invoked by `npm run seed`
+import { loadEnvConfig } from '@next/env';
 import { seedDatabase } from './seed';
 
 async function main() {
+  loadEnvConfig(process.cwd());
   console.log('Seeding database with 80 synthetic disputes...');
   const result = await seedDatabase();
   console.log(`Done: ${result.total} disputes (${result.train} train, ${result.holdout} holdout)`);

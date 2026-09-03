@@ -5,6 +5,7 @@
 
 CREATE TABLE IF NOT EXISTS orders (
   id                TEXT PRIMARY KEY,
+  payment_id        TEXT NOT NULL DEFAULT '',
   customer_id       TEXT NOT NULL,
   amount            INTEGER NOT NULL,          -- paise
   placed_at         INTEGER NOT NULL,          -- unix ts
@@ -64,6 +65,7 @@ CREATE TABLE IF NOT EXISTS scores (
   win_probability     REAL NOT NULL,
   completeness_score  REAL NOT NULL,
   missing_categories  TEXT NOT NULL DEFAULT '[]',  -- JSON array
+  model_version       TEXT NOT NULL DEFAULT 'baseline_rule',
   scored_at           INTEGER NOT NULL
 );
 

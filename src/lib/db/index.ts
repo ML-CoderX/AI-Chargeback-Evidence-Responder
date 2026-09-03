@@ -64,8 +64,25 @@ async function initializeDb(): Promise<SqlJsDatabase> {
     database.run(stmt);
   }
 
+  migrateExistingDatabase(database);
+
   saveDb(database);
   return database;
+}
+
+function hasColumn(database: SqlJsDatabase, table: string, column: string): boolean {
+  const info = database.exec(`PRAGMA table_info(${table})`);
+  const rows = info[0]?.values ?? [];
+  return rows.some(row => row[1] === column);
+}
+
+function migrateExistingDatabase(database: SqlJsDatabase): void {
+  if (!hasColumn(database, 'orders', 'payment_id')) {
+    database.run(`ALTER TABLE orders ADD COLUMN payment_id TEXT NOT NULL DEFAULT ''`);
+  }
+  if (!hasColumn(database, 'scores', 'model_version')) {
+    database.run(`ALTER TABLE scores ADD COLUMN model_version TEXT NOT NULL DEFAULT 'baseline_rule'`);
+  }
 }
 
 export function saveDb(database?: SqlJsDatabase): void {

@@ -187,9 +187,9 @@ export async function seedDatabase() {
 
     // ---- order ----
     db.run(
-      `INSERT INTO orders (id,customer_id,amount,placed_at,billing_address,shipping_address)
-       VALUES (?,?,?,?,?,?)`,
-      [orderId, customerId, amount, placedAt, addr(), addr()]
+      `INSERT INTO orders (id,payment_id,customer_id,amount,placed_at,billing_address,shipping_address)
+       VALUES (?,?,?,?,?,?,?)`,
+      [orderId, paymentId, customerId, amount, placedAt, addr(), addr()]
     );
 
     // ---- evidence_authentication ----

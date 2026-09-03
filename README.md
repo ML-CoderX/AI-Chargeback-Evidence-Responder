@@ -32,7 +32,7 @@ This system exists to help a human analyst prepare evidence for chargeback dispu
 
 4. **Full audit trail.** Every evidence retrieval, score computation, draft generation, and review action writes an append-only row to `audit_log`. There are no UPDATE or DELETE operations on this table.
 
-5. **Real orders, simulated disputes.** Orders are created live via Razorpay's test-mode API (`order_*` IDs are real Razorpay test-mode objects, visible in the Razorpay Dashboard). Dispute events, evidence fields, and outcomes are simulated, because Razorpay's sandbox cannot self-trigger a chargeback — only the underlying order can be real. Payments are synthetic (`pay_sim_*`) because Razorpay requires client-side checkout for payment creation (PCI-DSS compliance). If no API keys are configured, the seed falls back to fully synthetic order IDs.
+5. **Real orders, simulated disputes.** Orders are created live via Razorpay's test-mode API (`order_*` IDs are real Razorpay test-mode objects, visible in the Razorpay Dashboard). Payment references are stored with each order; in this server-side seed they are `pay_sim_*` placeholders because Razorpay's documented test-card flow creates `pay_*` IDs only after client-side Checkout returns success. Dispute events, evidence fields, and outcomes are simulated, because Razorpay's sandbox cannot self-trigger a chargeback. If no API keys are configured, the seed falls back to fully synthetic order IDs.
 
 ## Architecture
 
@@ -41,7 +41,9 @@ This system exists to help a human analyst prepare evidence for chargeback dispu
 | Framework | Next.js 16 (App Router, TypeScript) |
 | Styling | Tailwind CSS + CSS custom properties |
 | Database | SQLite via sql.js (pure JS, no native build) |
-| Scoring | Rule-weighted heuristic (7 signals, every weight documented) |
+| Payments | Razorpay Node SDK (test-mode orders via API; simulated payment references in seed) |
+| AI/ML | Trained logistic regression classifier (scoring), Gemini 2.0 Flash (draft narrative) |
+| Scoring | Trained classifier + rule-weighted baseline (both evaluated side-by-side) |
 
 ## Data model
 
@@ -52,21 +54,7 @@ This system exists to help a human analyst prepare evidence for chargeback dispu
 
 ## Scoring
 
-The win-probability scorer uses explicit rule-weighted signals (not ML). Every weight is documented in `src/lib/scoring/engine.ts`:
-
-- `three_ds_result === 'success'`: +25%
-- `delivery_confirmed === 1`: +20%
-- `avs_match === 1`: +10%
-- `signature_captured === 1`: +10%
-- `prior_dispute_count >= 3`: −10%
-
-Evaluation on the 20 held-out disputes (threshold: 0.5):
-
-| Metric | Value |
-|:-------|:------|
-| Precision | 80.0% |
-| Recall | 44.4% |
-| F1 | 57.1% |
+The primary win-probability score is a trained logistic regression classifier (`trained_v1`) fit only on the 60 non-holdout disputes. The original explicit rule-weighted scorer is retained as `baseline_rule` for comparison. Every score row records its `model_version`, and `/metrics` evaluates both models side by side on the 20 held-out disputes.
 
 ## Pages
 

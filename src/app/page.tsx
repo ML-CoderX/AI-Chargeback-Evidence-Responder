@@ -29,6 +29,12 @@ interface DisputeDetail {
   auditLog: Array<Record<string, unknown>>;
 }
 
+type EvidenceAnalysis = {
+  present: string[];
+  missing: string[];
+  fields: Array<{ key: string; label: string; value: unknown; isMissing: boolean }>;
+};
+
 interface DraftData {
   disputeId: string;
   reasonCode: string;
@@ -39,6 +45,7 @@ interface DraftData {
     missingReason?: string;
   }>;
   markdownText: string;
+  source?: "gemini" | "template";
 }
 
 /* ── Helpers ── */
@@ -72,6 +79,7 @@ export default function CasesPage() {
   const [loading, setLoading] = useState(true);
   const [scoring, setScoring] = useState(false);
   const [scoringAll, setScoringAll] = useState(false);
+  const [draftLoading, setDraftLoading] = useState(false);
   const [seeding, setSeeding] = useState(false);
   const [tab, setTab] = useState<"evidence" | "draft" | "audit">("evidence");
   const [sortBy, setSortBy] = useState("filed_at");
@@ -96,8 +104,10 @@ export default function CasesPage() {
   }, []);
 
   const fetchDraft = useCallback(async (id: string) => {
+    setDraftLoading(true);
     const res = await fetch(`/api/disputes/${id}/draft`);
     if (res.ok) setDraft(await res.json());
+    setDraftLoading(false);
   }, []);
 
   useEffect(() => { fetchDisputes(); }, [fetchDisputes]);
@@ -239,6 +249,7 @@ export default function CasesPage() {
               tab={tab}
               setTab={setTab}
               scoring={scoring}
+              draftLoading={draftLoading}
               onScore={() => handleScore(selected)}
               onFetchDraft={() => fetchDraft(selected)}
               onMarkReviewed={() => handleMarkReviewed(selected)}
@@ -339,19 +350,31 @@ function CaseRow({ dispute: d, isSelected, onSelect }: {
    DETAIL PANEL — right side
    ──────────────────────────────────────────── */
 function DetailPanel({
-  detail, draft, tab, setTab, scoring, onScore, onFetchDraft, onMarkReviewed,
+  detail, draft, tab, setTab, scoring, draftLoading, onScore, onFetchDraft, onMarkReviewed,
 }: {
   detail: DisputeDetail;
   draft: DraftData | null;
   tab: "evidence" | "draft" | "audit";
   setTab: (t: "evidence" | "draft" | "audit") => void;
   scoring: boolean;
+  draftLoading: boolean;
   onScore: () => void;
   onFetchDraft: () => void;
   onMarkReviewed: () => void;
 }) {
   const d = detail.dispute;
   const latestScore = detail.scores[0];
+  const latestScorePayload = (() => {
+    if (!latestScore) return null;
+    try {
+      return detail.auditLog
+        .filter(a => a.action === "score_computed")
+        .map(a => JSON.parse((a.payload_json as string) ?? "{}"))
+        .find(p => p.model_version === latestScore.model_version) ?? null;
+    } catch {
+      return null;
+    }
+  })();
 
   return (
     <article>
@@ -412,10 +435,7 @@ function DetailPanel({
           <h3 style={{ fontSize: "0.8rem", fontFamily: "var(--font-serif)", marginBottom: "var(--sp-2)" }}>Score factors</h3>
           {(() => {
             try {
-              const payload = JSON.parse(
-                (detail.auditLog.find(a => a.action === "score_computed") as Record<string, unknown>)?.payload_json as string ?? "{}"
-              );
-              const factors: string[] = payload.top_factors ?? [];
+              const factors: string[] = latestScorePayload?.top_factors ?? [];
               return factors.map((f: string, i: number) => (
                 <div key={i} style={{
                   fontSize: "0.75rem", color: f.startsWith("+") ? "var(--signal-strong)" : f.startsWith("-") ? "var(--signal-weak)" : "var(--ink-secondary)",
@@ -458,14 +478,70 @@ function DetailPanel({
 
       {/* Tab content */}
       {tab === "evidence" && <EvidenceTab evidence={detail.evidence} />}
-      {tab === "draft" && <DraftTab draft={draft} onFetchDraft={onFetchDraft} onMarkReviewed={onMarkReviewed} status={d.status as string} />}
+      {tab === "draft" && <DraftTab draft={draft} onFetchDraft={onFetchDraft} onMarkReviewed={onMarkReviewed} status={d.status as string} loading={draftLoading} />}
       {tab === "audit" && <AuditTab entries={detail.auditLog} />}
     </article>
   );
 }
 
 /* ── Evidence Tab ── */
+
+/** Single source of truth: inspect a data row's fields and classify each as present/missing.
+ *  The banner text is derived FROM this same check — never a separate hardcoded string. */
+const FIELD_LABELS: Record<string, Record<string, string>> = {
+  authentication: {
+    avs_match: "AVS match",
+    cvv_match: "CVV match",
+    three_ds_result: "3D Secure result",
+    device_fingerprint: "Device fingerprint",
+  },
+  fulfillment: {
+    delivery_confirmed: "Delivery confirmation",
+    tracking_id: "Tracking ID",
+    delivered_at: "Delivery date",
+    signature_captured: "Delivery signature",
+  },
+  behavioral: {
+    prior_order_count: "Prior order count",
+    prior_dispute_count: "Prior dispute count",
+    policy_accepted_at: "Policy acceptance record",
+    account_age_days: "Account age",
+  },
+  communication: {
+    support_tickets_count: "Support ticket count",
+    last_contact_at: "Last contact date",
+    confirmation_email_sent: "Confirmation email record",
+  },
+};
+
+function displayLabel(categoryKey: string, fieldKey: string): string {
+  return FIELD_LABELS[categoryKey]?.[fieldKey] ?? fieldKey.replace(/_/g, " ");
+}
+
+function analyzeFields(categoryKey: string, data: Record<string, unknown> | null, skipKeys: string[]): EvidenceAnalysis {
+  if (!data) return { present: [], missing: [], fields: [] };
+  const fields = Object.entries(data)
+    .filter(([k]) => !skipKeys.includes(k))
+    .map(([key, value]) => {
+      const isMissing = value === null || value === undefined;
+      return { key, label: displayLabel(categoryKey, key), value, isMissing };
+    });
+  return {
+    present: fields.filter(f => !f.isMissing).map(f => f.label),
+    missing: fields.filter(f => f.isMissing).map(f => f.label),
+    fields,
+  };
+}
+
+function sectionBanner(present: string[], missing: string[], label: string): string | null {
+  if (present.length === 0 && missing.length === 0) return `No ${label.toLowerCase()} evidence on file`;
+  if (present.length === 0) return `No ${label.toLowerCase()} evidence on file; ${missing.join(", ")} missing`;
+  if (missing.length === 0) return null;
+  return `${present.join(", ")} present; ${missing.join(", ")} missing`;
+}
+
 function EvidenceTab({ evidence }: { evidence: DisputeDetail["evidence"] }) {
+  const skipKeys = ["order_id", "customer_id"];
   const categories = [
     { key: "authentication", label: "Transaction Authentication", data: evidence.authentication },
     { key: "fulfillment", label: "Fulfillment / Delivery", data: evidence.fulfillment },
@@ -475,30 +551,39 @@ function EvidenceTab({ evidence }: { evidence: DisputeDetail["evidence"] }) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "var(--sp-4)" }}>
-      {categories.map(cat => (
-        <div key={cat.key}>
-          <h3 style={{ fontFamily: "var(--font-serif)", fontSize: "0.85rem", marginBottom: "var(--sp-2)" }}>
-            {cat.label}
-          </h3>
-          {!cat.data ? (
-            <div className="evidence-missing">
-              No {cat.label.toLowerCase()} evidence on file
-            </div>
-          ) : (
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--sp-2)" }}>
-              {Object.entries(cat.data).filter(([k]) => k !== "order_id" && k !== "customer_id").map(([key, val]) => (
-                <EvidenceField key={key} label={key} value={val} />
-              ))}
-            </div>
-          )}
-        </div>
-      ))}
+      {categories.map(cat => {
+        const { present, missing, fields } = analyzeFields(cat.key, cat.data, skipKeys);
+        const banner = sectionBanner(present, missing, cat.label);
+        const allMissing = present.length === 0 && missing.length > 0;
+
+        return (
+          <div key={cat.key}>
+            <h3 style={{ fontFamily: "var(--font-serif)", fontSize: "0.85rem", marginBottom: "var(--sp-2)" }}>
+              {cat.label}
+            </h3>
+            {/* Banner derived from the same field-presence analysis as below */}
+            {banner && (
+              <div className={allMissing ? "evidence-missing" : "evidence-present"} style={{ marginBottom: "var(--sp-2)", fontSize: "0.8rem" }}>
+                {banner}
+              </div>
+            )}
+            {/* Individual fields — same source of truth as the banner */}
+            {fields.length > 0 && (
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--sp-2)" }}>
+                {fields.map(field => (
+                  <EvidenceField key={field.key} label={field.label} value={field.value} isMissing={field.isMissing} />
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
 
-function EvidenceField({ label, value }: { label: string; value: unknown }) {
-  const isMissing = value === null || value === undefined;
+
+function EvidenceField({ label, value, isMissing }: { label: string; value: unknown; isMissing: boolean }) {
   const displayVal = isMissing ? "not on file"
     : value === 1 ? "yes"
     : value === 0 ? "no"
@@ -511,7 +596,7 @@ function EvidenceField({ label, value }: { label: string; value: unknown }) {
       background: isMissing ? "var(--signal-weak-bg)" : "var(--signal-strong-bg)",
     }}>
       <div style={{ fontSize: "0.65rem", color: "var(--ink-muted)", textTransform: "uppercase", letterSpacing: "0.04em" }}>
-        {label.replace(/_/g, " ")}
+        {label}
       </div>
       <div style={{
         fontSize: "0.8rem",
@@ -525,12 +610,30 @@ function EvidenceField({ label, value }: { label: string; value: unknown }) {
 }
 
 /* ── Draft Tab ── */
-function DraftTab({ draft, onFetchDraft, onMarkReviewed, status }: {
+function DraftTab({ draft, onFetchDraft, onMarkReviewed, status, loading }: {
   draft: DraftData | null;
   onFetchDraft: () => void;
   onMarkReviewed: () => void;
   status: string;
+  loading?: boolean;
 }) {
+  if (loading) {
+    return (
+      <div style={{ textAlign: "center", padding: "var(--sp-8)" }}>
+        <div style={{ marginBottom: "var(--sp-4)", fontSize: "0.85rem", color: "var(--ink-muted)" }}>
+          Generating response narrative…
+        </div>
+        <div style={{
+          width: 24, height: 24, border: "2px solid var(--surface-border)",
+          borderTopColor: "var(--ink)", borderRadius: "50%",
+          margin: "0 auto",
+          animation: "spin 0.8s linear infinite",
+        }} />
+        <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
+      </div>
+    );
+  }
+
   if (!draft) {
     return (
       <div style={{ textAlign: "center", padding: "var(--sp-8)" }}>
@@ -541,6 +644,16 @@ function DraftTab({ draft, onFetchDraft, onMarkReviewed, status }: {
 
   return (
     <div>
+      {/* Source indicator */}
+      <div style={{
+        fontSize: "0.65rem", color: "var(--ink-faint)",
+        marginBottom: "var(--sp-4)", textTransform: "uppercase", letterSpacing: "0.05em",
+      }}>
+        {draft.source === "gemini"
+          ? "Narrative generated by Gemini AI · grounded to evidence bundle"
+          : "AI narrative unavailable, showing structured draft"}
+      </div>
+
       {draft.sections.map((s, i) => (
         <div key={i} style={{ marginBottom: "var(--sp-6)" }}>
           <h3 style={{ fontFamily: "var(--font-serif)", fontSize: "0.85rem", marginBottom: "var(--sp-2)" }}>

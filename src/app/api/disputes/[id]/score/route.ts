@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getDb, queryOne } from '@/lib/db';
 import { retrieveEvidence } from '@/lib/evidence/retriever';
 import { scoreDispute } from '@/lib/scoring/engine';
+import { scoreDisputeTrained } from '@/lib/scoring/classifier';
 import { ReasonCode } from '@/types';
 
 export async function POST(
@@ -14,14 +15,17 @@ export async function POST(
   if (!dispute) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
   const bundle = await retrieveEvidence(id);
-  const result = await scoreDispute(bundle, {
+  const meta = {
     reason_code: dispute.reason_code as ReasonCode,
     amount: dispute.amount as number,
-  });
+  };
+  const baseline = await scoreDispute(bundle, meta, 'baseline_rule');
+  const trained = await scoreDisputeTrained(bundle, meta);
 
   return NextResponse.json({
     disputeId: id,
-    completeness: result.completeness,
-    winProbability: result.winProb,
+    completeness: trained.completeness,
+    winProbability: trained.winProb,
+    baselineWinProbability: baseline.winProb,
   });
 }

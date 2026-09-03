@@ -231,7 +231,8 @@ export function scoreWinProbability(
 
 export async function scoreDispute(
   bundle: EvidenceBundle,
-  disputeMeta: { reason_code: ReasonCode; amount: number }
+  disputeMeta: { reason_code: ReasonCode; amount: number },
+  modelVersion: string = 'baseline_rule'
 ) {
   const completeness = scoreCompleteness(bundle, bundle.categories);
   const winProb = scoreWinProbability(bundle, disputeMeta);
@@ -239,11 +240,11 @@ export async function scoreDispute(
   const now = Math.floor(Date.now() / 1000);
   const db = await getDb();
 
-  // Write to scores table
+  // Write to scores table with model_version
   db.run(
-    `INSERT INTO scores (dispute_id, win_probability, completeness_score, missing_categories, scored_at)
-     VALUES (?, ?, ?, ?, ?)`,
-    [bundle.disputeId, winProb.probability, completeness.score, JSON.stringify(completeness.missing), now]
+    `INSERT INTO scores (dispute_id, win_probability, completeness_score, missing_categories, model_version, scored_at)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+    [bundle.disputeId, winProb.probability, completeness.score, JSON.stringify(completeness.missing), modelVersion, now]
   );
 
   // Audit log
@@ -256,6 +257,7 @@ export async function scoreDispute(
       completeness: completeness.score,
       missing: completeness.missing,
       top_factors: winProb.topFactors,
+      model_version: modelVersion,
     }),
     timestamp: now,
   });

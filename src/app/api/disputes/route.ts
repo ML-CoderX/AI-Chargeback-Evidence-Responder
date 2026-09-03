@@ -26,7 +26,7 @@ export async function GET(req: NextRequest) {
 
   const rows = queryAll(db, `
     SELECT d.*,
-           o.customer_id, o.billing_address, o.shipping_address,
+           o.customer_id, o.payment_id, o.billing_address, o.shipping_address,
            latest_score.win_probability,
            latest_score.completeness_score,
            latest_score.missing_categories
@@ -34,8 +34,14 @@ export async function GET(req: NextRequest) {
     JOIN orders o ON d.order_id = o.id
     LEFT JOIN (
       SELECT s1.* FROM scores s1
-      INNER JOIN (SELECT dispute_id, MAX(scored_at) AS max_at FROM scores GROUP BY dispute_id) s2
-      ON s1.dispute_id = s2.dispute_id AND s1.scored_at = s2.max_at
+      INNER JOIN (
+        SELECT dispute_id, MAX(scored_at) AS max_at FROM scores GROUP BY dispute_id
+      ) s2 ON s1.dispute_id = s2.dispute_id AND s1.scored_at = s2.max_at
+      WHERE s1.model_version = 'trained_v1'
+         OR NOT EXISTS (
+           SELECT 1 FROM scores st
+           WHERE st.dispute_id = s1.dispute_id AND st.model_version = 'trained_v1'
+         )
     ) latest_score ON latest_score.dispute_id = d.id
     ${where}
     ORDER BY ${sortCol} ${order}

@@ -584,9 +584,14 @@ function EvidenceTab({ evidence }: { evidence: DisputeDetail["evidence"] }) {
 
 
 function EvidenceField({ label, value, isMissing }: { label: string; value: unknown; isMissing: boolean }) {
+  // Detect date fields and format Unix timestamps
+  const isDateField = label.toLowerCase().includes("date") || label.toLowerCase().includes("at");
+
   const displayVal = isMissing ? "not on file"
     : value === 1 ? "yes"
     : value === 0 ? "no"
+    : (isDateField && typeof value === "number" && value > 1000000000)
+      ? fmtDate(value)  // Format Unix timestamps as readable dates
     : String(value);
 
   return (

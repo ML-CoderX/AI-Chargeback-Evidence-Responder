@@ -9,17 +9,18 @@
 // Falls back to the existing templated draft if the API fails.
 // ============================================================
 
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import { GoogleGenAI } from '@google/genai';
 import crypto from 'crypto';
 import { EvidenceBundle, DraftSection, ReasonCode, EvidenceCategory } from '@/types';
 import { getDb, insertAuditLog, saveDb } from '@/lib/db';
 
-const MODEL_NAME = 'gemini-pro';
+const MODEL_NAME = 'gemini-3.6-flash';
 
-function getGeminiClient(): GoogleGenerativeAI | null {
-  const apiKey = process.env.GEMINI_API_KEY;
+function getGeminiClient(): GoogleGenAI | null {
+  // Support both legacy standard API keys (AIza...) and current authorization keys (AQ...)
+  const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
   if (!apiKey || apiKey === 'REPLACE_ME') return null;
-  return new GoogleGenerativeAI(apiKey);
+  return new GoogleGenAI({ apiKey });
 }
 
 const SYSTEM_PROMPT = `You are a chargeback dispute evidence analyst. Write a persuasive, professional dispute response narrative for a merchant defending against a chargeback.
@@ -88,26 +89,21 @@ export async function generateLLMDraft(
   };
 
   try {
-    const model = client.getGenerativeModel({ model: MODEL_NAME });
     const promptBody = `Evidence bundle (JSON):\n${JSON.stringify(evidenceInput, null, 2)}\n\nWrite the dispute response narrative now.`;
     const promptHash = crypto
       .createHash('sha256')
       .update(`${SYSTEM_PROMPT}\n\n${promptBody}`)
       .digest('hex');
 
-    const result = await model.generateContent({
-      contents: [
-        {
-          role: 'user',
-          parts: [
-            { text: SYSTEM_PROMPT },
-            { text: `\n\n${promptBody}` },
-          ],
-        },
-      ],
+    const result = await client.models.generateContent({
+      model: MODEL_NAME,
+      contents: promptBody,
+      config: {
+        systemInstruction: SYSTEM_PROMPT,
+      },
     });
 
-    const responseText = result.response.text();
+    const responseText = result.text || '';
 
     // Parse into sections (the LLM writes markdown with ## headers)
     const sections = parseLLMResponse(responseText, bundle);
@@ -132,7 +128,28 @@ export async function generateLLMDraft(
 
     return { sections, markdownText, usedLLM: true };
   } catch (error) {
-    console.error('Gemini API error:', error);
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error('Gemini API error:', errorMessage);
+
+    // Log the error to audit for debugging
+    try {
+      const db = await getDb();
+      insertAuditLog(db, {
+        dispute_id: disputeId,
+        action: 'draft_generation_failed',
+        actor: 'system',
+        payload_json: JSON.stringify({
+          model: MODEL_NAME,
+          error: errorMessage.substring(0, 200),
+          timestamp: new Date().toISOString(),
+        }),
+        timestamp: Math.floor(Date.now() / 1000),
+      });
+      saveDb();
+    } catch (auditError) {
+      console.error('Failed to log audit entry:', auditError);
+    }
+
     return { sections: [], markdownText: '', usedLLM: false };
   }
 }

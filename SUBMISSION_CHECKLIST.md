@@ -126,7 +126,7 @@ If this key is expired, generate a new one at https://aistudio.google.com/apikey
 - ✅ Query: `SELECT COUNT(*) WHERE is_holdout=1 AND model_versions=2` returns 20
 
 ### README Update ✅
-- ✅ Architecture table includes AI/ML row: "Trained logistic regression classifier (scoring), Gemini Pro (draft narrative)"
+- ✅ Architecture table includes AI/ML row: "Trained logistic regression classifier (scoring), Gemini (draft narrative)"
 - ✅ Scoring section documents both models evaluated side-by-side
 - ✅ Real orders/synthetic disputes architecture clearly explained
 

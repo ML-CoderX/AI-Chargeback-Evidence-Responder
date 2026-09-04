@@ -42,7 +42,7 @@ This system exists to help a human analyst prepare evidence for chargeback dispu
 | Styling | Tailwind CSS + CSS custom properties |
 | Database | SQLite via sql.js (pure JS, no native build) |
 | Payments | Razorpay Node SDK (test-mode orders via API; simulated payment references in seed) |
-| AI/ML | Trained logistic regression classifier (scoring), Gemini Pro (draft narrative) |
+| AI/ML | Trained logistic regression classifier (scoring), Gemini (draft narrative) |
 | Scoring | Trained classifier + rule-weighted baseline (both evaluated side-by-side) |
 
 ## Data model
